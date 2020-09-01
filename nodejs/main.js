@@ -5,42 +5,15 @@
 //혜영(08.31) - 글생성 UI 만들기, 사용자가 입력한 정보를 받아서 동적으로 데이터 디렉토리에 파일 생성
 //기현(09.01) - 글수정, 글삭제 기능 구현
 //혜영(09.01) - 객체화로 템플릿 기능 정리_리팩토링
+//기현(09.01) - template 모듈화, 입출력 정보 보안
 
 var http = require('http');
 var fs = require('fs');
 var url = require('url');
 var qs = require('querystring');
- 
-var template = {
-  HTML:function (title, list, body, control){
-    return `
-    <!doctype html>
-    <html>
-    <head>
-      <title>WEB1 - ${title}</title>
-      <meta charset="utf-8">
-    </head>
-    <body>
-      <h1><a href="/">WEB</a></h1>
-      ${list}
-      ${control}
-      ${body}
-    </body>
-    </html>
-    `;
-  }, list:function (filelist){
-    var list = '<ul>';
-    var i = 0;
-    while(i < filelist.length){
-      list = list + `<li><a href="/?id=${filelist[i]}">${filelist[i]}</a></li>`;
-      i = i + 1;
-    }
-    list = list+'</ul>';
-    return list;
-  }
-  
-}
-
+var template = require('./lib/template.js')
+var path = require('path');
+var sanitizeHtml = require('sanitize-html');
 
 var app = http.createServer(function(request,response){
     var _url = request.url;
@@ -66,15 +39,23 @@ var app = http.createServer(function(request,response){
       } else {
         // 목록에 있는 각 page, delete는 링크로 하면 x -> form
         fs.readdir('./data', function(error, filelist){
-          fs.readFile(`data/${queryData.id}`, 'utf8', function(err, description){
+          //보안
+          var filteredId = path.parse(queryData.id).base;
+
+          fs.readFile(`data/${filteredId}`, 'utf8', function(err, description){
             var title = queryData.id;
+            //보안을 위해 따로 변수를 사용
+            var sanitizedTitle = sanitizeHtml(title);
+            var sanitizedDescription = sanitizeHtml(description, {
+              allowedTags:['h1']
+            });
             var list = template.list(filelist);
-            var html = template.HTML(title, list,
-              `<h2>${title}</h2>${description}`,
+            var html = template.HTML(sanitizedTitle, list,
+              `<h2>${sanitizedTitle}</h2>${sanitizedDescription}`,
               ` <a href="/create">create</a>
-                <a href="/update?id=${title}">update</a>
+                <a href="/update?id=${sanitizedTitle}">update</a>
                 <form action="delete_process" method="post">
-                  <input type="hidden" name="id" value="${title}">
+                  <input type="hidden" name="id" value="${sanitizedTitle}">
                   <input type="submit" value="delete">
                 </form>`
             );
@@ -116,7 +97,7 @@ var app = http.createServer(function(request,response){
         var post = qs.parse(body);
         var title = post.title;
         var description = post.description;
-        fs.writeFile(`data/${title}`, description, 'utf-8', function(err){
+        fs.writeFile(`data/${title}`, description, 'utf8', function(err){
           // 리다이렉션
           response.writeHead(302, {Location: `/?id=${title}`});
           response.end();
@@ -125,7 +106,10 @@ var app = http.createServer(function(request,response){
     } else if(pathname === '/update'){
       //update 페이지, hidden 쓰면 안보임
       fs.readdir('./data', function(error, filelist){
-        fs.readFile(`data/${queryData.id}`, 'utf8', function(err, description){
+        //보안
+        var filteredId = path.parse(queryData.id).base;
+
+        fs.readFile(`data/${filteredId}`, 'utf8', function(err, description){
           var title = queryData.id;
           var list = template.list(filelist);
           var html = template.HTML(title, list,
@@ -181,7 +165,9 @@ var app = http.createServer(function(request,response){
         // qs.parse 통해 정보 객체화
         var post = qs.parse(body);
         var id = post.id;
-        fs.unlink(`data/${id}`, function(error){
+        var filteredId = path.parse(id).base;
+        
+        fs.unlink(`data/${filteredId}`, function(error){
           //삭제 후 home으로 보냄
           response.writeHead(302, {Location: `/`});
           response.end();
